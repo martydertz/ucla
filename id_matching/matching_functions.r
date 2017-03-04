@@ -30,4 +30,24 @@ matchEmails <- function(missingDataFrame, refDataCurrent, refDataEmails, emailCo
   }
   return(missingDataFrame)
 }
-
+#Matching First and Last Names Exactly
+exactMatchFirstLastNameYearProgram<- function(missingDataFrame, refDataCurrent, 
+                                                   colNames = c("First.Name", "Last.Name","Year", "Program")){
+  fNameColumn <- colNames[1]
+  lNameColumn <- colNames[2]
+  yearColumn <- colNames[3]
+  programColumn <- colNames[4]
+  #For each record missing ID
+  for(i in seq(dim(missingDataFrame)[1])){
+    fName <- missingDataFrame[i, fNameColumn]
+    lName <- missingDataFrame[i, lNameColumn]
+    year <- missingDataFrame[i, yearColumn]
+    prog <- missingDataFrame[i, programColumn]
+    m <- subset(refDataCurrent, crm_first_name == fName & crm_last_name == lName & DEGREE1_YEAR == year & PROGRAM == prog)
+    if(dim(m)[1] == 1){
+      missingDataFrame[i,'CRM.ID'] = m[['id']]
+      missingDataFrame[i, 'Match.Method'] = 'Full Name Exact Match + Year + Program'
+    }
+  }
+  return(missingDataFrame)
+}
