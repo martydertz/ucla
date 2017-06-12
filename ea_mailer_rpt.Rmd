@@ -1,0 +1,214 @@
+---
+title: "ea_mailer"
+author: "mdertz"
+date: "June 10, 2017"
+output: html_document
+---
+# A Look at OAR's 2016 Emails
+
+```{r  include=FALSE}
+library(ggplot2) #Visualizing data
+library(dplyr) #Data manipulation functions
+library(tidyr) #Data manipulation functions
+library(lubridate) # functions for dates and times
+library(knitr)
+library(scales)
+library(NLP)
+
+```
+
+## Getting the Data
+External Affairs provided data for all OAR's 2016 emails in 7 .csv files: 
+
+- 1 file for all emails sent (there were 382 in 2016)
+- 6 files with data for each email recipient.
+
+We'll first load the recipients data by creating a data.frame named 'recipients' with the column names used in each of the 6 recipient files, switching to the directory with the 6 .csv files, then looping over the file names -- for each file first assigning it to a data.frame then appending the data.frame to the 'recipients' data.frame.
+
+Then we'll read the 1 sent file to a data.frame names 'emails'.
+
+```{r }
+#Set working directory to directory with recipient files
+setwd("E:\\ucla\\exports")
+fields <- c('EmailID',	'RecipientID',	'EmailAddress',	'SendStatus',	
+              'SendStatusDesc',	'SendStatusDt',	'IsSending',	'CustomData1',	
+              'CustomData2',	'CustomData3',	'CustomData4',	'CustomData5',	
+              'CustomData6',	'CustomData7',	'CustomData8',	'CustomData9',	
+              'CustomData10',	'CustomData11',	'CustomData12',	'CustomData13',	
+              'CustomData14',	'CustomData15',	'CustomData16',	'CustomData17',	
+              'CustomData18',	'CustomData19',	'CustomData20',	'SendingServerID',	
+              'SegmentCode',	'FinderNumber',	'MarketingEffortID',	'EmailOpenedCount',	
+              'LinkClickedCount')
+#Create empty data.frame to hold recipients data
+recipients <- data.frame(EmailID = '' ,	RecipientID = '' ,	EmailAddress = '' ,	SendStatus = '' ,	
+                         SendStatusDesc = '' ,	SendStatusDt = '' ,	IsSending = '' ,	CustomData1 = '' ,	
+                         CustomData2 = '' ,	CustomData3 = '' ,	CustomData4 = '' ,	CustomData5 = '' ,	
+                         CustomData6 = '' ,	CustomData7 = '' ,	CustomData8 = '' ,	CustomData9 = '' ,	
+                         CustomData10 = '' ,	CustomData11 = '' ,	CustomData12 = '' ,	CustomData13 = '' ,
+                         CustomData14 = '' ,	CustomData15 = '' ,	CustomData16 = '' ,	CustomData17 = '' ,
+                         CustomData18 = '' ,	CustomData19 = '' ,	CustomData20 = '' ,	SendingServerID = '' ,	
+                         SegmentCode = '' ,	FinderNumber = '' ,	MarketingEffortID = '' ,	EmailOpenedCount = '' ,	
+                         LinkClickedCount = '')
+#Read all recipient files. Assumes recipient files are only files in current directory
+for(fileName in list.files()){
+  print(paste("Reading ", fileName, "..."))
+  df <- read.csv(fileName, header=TRUE, stringsAsFactors = FALSE)
+  recipients<- rbind(df, recipients)
+  rm(df)
+}
+#Formate recipient columns
+recipients$EmailOpenedCount <- as.integer(recipients$EmailOpenedCount)
+recipients$SendingServerID <- as.integer(recipients$SendingServerID)
+
+#Switch to directory with email file
+setwd("E:\\ucla")
+emails <- read.csv("Anderson Emails sent.csv")
+#Format date columns
+emails$EmailID <- as.integer(emails$EmailID)
+emails <- emails %>% 
+      mutate(SendDt =  as.POSIXct(strptime(DtSent, format="%m/%d/%y %H:%M"))) %>%
+      mutate(weekday = lubridate::wday(SendDt, label = TRUE)) %>%
+      mutate(month = as.factor(lubridate::month(SendDt, label=TRUE))) %>%
+      mutate(hour_of_day = as.integer(hour(SendDt))) %>%
+      mutate(EmailID = as.character(EmailID)) %>%
+      mutate(time_of_day = ifelse(hour_of_day <11, "morning", 
+                                  ifelse(hour_of_day >=11 & hour_of_day < 15, "midday", 
+                                         "evening")))
+num_emails <- dim(emails[1])
+```
+## Some Formatting & Combining Data
+Some of the more useful questions -- like are email open rates the same on Tuesday as Wednesday -- require combining the email data with the recipients data. That's because the fields about the email, like time of day, are in the email dataframe while opens and clicks are in the recipients file.
+
+```{r}
+#Combine emails with recipients data
+emailAll  <- inner_join(emails, recipients, by = c("EmailID" ="EmailID"))
+
+```
+
+
+
+```{r }
+ggplot(emails, aes(x=month)) + geom_bar() + 
+    labs(
+        title=paste0("Most of OAR's ", num_emails, " emails were sent in January, May and June")
+    )+
+    theme_classic()
+```
+
+```{r }
+#Barchart of email counts by month
+ggplot(emails, aes(x=month)) + geom_bar(aes(fill=EmailCategoryTitle)) + 
+    labs(
+        title="Solicitations Peak in June & December While Event Emails & Newsletters
+        Take Their Place in January & October",
+        subtitle="Th is Doesn't Capture Alumni Weekend Emails Sent via CVent"
+        )+
+    theme_classic()
+```
+
+## Newsletters Anomoly
+One thing that jumps out from the barchart above is how many newsletters were sent in January. It seems odd to have 30 sent in one month, so a little digging is in order. First a look at the counts to go along with our barchart
+
+```{r}
+kable(emails %>%
+          select(EmailID, month, EmailCategoryTitle) %>%
+          group_by(month, EmailCategoryTitle) %>%
+          summarise(Emails.Sent = n())
+)
+
+```
+
+So why were there so many January Newsletters? Let's look at two of them to see if we can determine what's going on
+
+
+```{r}
+
+emails %>% 
+    select(EmailID, Description, Title..Project., SendDt,EmailCategoryTitle)%>%
+    filter(EmailID %in% c("105159", "105160")) %>%
+    kable(caption="List Refreshes Are Newsletters")
+
+```
+
+The answer is that List Refreshes are tagged as Newsletters. Since we're interested in open rates we're more interested in recipients. That is, we're less interested in how many emails we send and more interested in how many people we email.
+
+
+```{r}
+ggplot(emailAll, aes(x=month))+geom_bar(aes(fill=EmailCategoryTitle))+
+    labs(title="We Emailed More People In November Than Any Other Month")+
+    scale_y_continuous(labels=comma)
+```
+A question inspired by the chart above is whether there is email fatigue? Looking at the above chart it seems reasonable to think the open rates in November would be lower than other months, especially for events.
+
+```{r}
+
+mthly_open_rt <- emailAll %>%
+        select(month, OpenStatus) %>%
+        group_by(month) %>%
+        summarise(open_rate=mean(OpenStatus), people_emailed=n()) %>%
+        arrange(open_rate)
+mthly_open_rt %>%
+    mutate(open_rate = percent(open_rate)) %>%
+    kable()
+p<- ggplot(mthly_open_rt, aes(x=people_emailed, y=open_rate))+geom_point()
+
+```
+```{r}
+p + scale_x_continuous(labels=comma)+
+    scale_y_continuous(labels=percent)+ 
+    geom_smooth(method="lm", span=.01)+
+    labs(title= "Email Fatigue: Monthly Open Rates Generally Decrease as 
+         People Emailed Increases",
+         subtitle = "Suggests coordination accross events/development email campaigns"
+    )
+```
+
+## Day of Week
+
+We saw sending a lot of emails in a month causes open rates to be lower which makes sense: getting bombarded by emails over a short period of time would make recipients less likely to open each seccessive emails.But what are other factors related to open rates? For example are emails more likely to be sent 
+
+```{r}
+open_rates <- emailAll %>% 
+  select(EmailID, weekday, month, EmailCategoryTitle, OpenStatus) %>%
+  group_by(EmailID, weekday, month, EmailCategoryTitle) %>%
+  summarise(open_rate = mean(OpenStatus))
+  
+ggplot(open_rates, aes(x=weekday, y=month))+ geom_raster(aes(fill=open_rate))+
+    theme_minimal() +
+    labs(
+        title="Thursday and Tuesday Have Highest Open Rates"
+    )
+```
+
+## What About Time of Day
+
+Now that we've seen there's a reletionship between the day an email is sent and its open rate it seems natural to as if the time of day an email is sent will have an impact on open rates. We'll divide the day into three parts: 
+
+1. Morning: Before 11 AM
+2. Midday: Between 11 AM and 3 PM
+3. Evening: After 3 PM
+
+```{r}
+
+open_rates <- emailAll %>%
+                        select(EmailID, time_of_day, EmailCategoryTitle, OpenStatus) %>%
+                        group_by(EmailID, time_of_day,EmailCategoryTitle) %>%
+                        summarise(open_rate = mean(OpenStatus))
+ggplot(open_rates, aes(x=time_of_day, y=open_rate))+
+    geom_violin() + 
+    scale_y_continuous(labels=percent)
+```
+
+```{r }
+# Open Rates by Degree Year
+deg_yr_open_rates <- recipient_alumni %>%
+                                    select(DEGREE1_YEAR,EmailCategoryTitle, OpenStatus) %>%
+                                    group_by(DEGREE1_YEAR, EmailCategoryTitle) %>%
+                                    summarise(open_rate = mean(OpenStatus)) 
+ggplot(deg_yr_open_rates, aes(x=DEGREE1_YEAR, y=open_rate)) + 
+    geom_jitter() + geom_smooth(method="loess")+
+    scale_y_continuous(labels=scales::percent)+
+    facet_grid(.~EmailCategoryTitle)
+```
+
+
