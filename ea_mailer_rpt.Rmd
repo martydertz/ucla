@@ -12,8 +12,9 @@ library(dplyr) #Data manipulation functions
 library(tidyr) #Data manipulation functions
 library(lubridate) # functions for dates and times
 library(knitr)
-library(scales)
-library(NLP)
+library(scales) #percent labels for graphs
+library(tm) #Document-term matrix
+library(wordcloud) #Making a wordcould w/ DTM
 
 ```
 
@@ -73,8 +74,10 @@ emails <- emails %>%
       mutate(EmailID = as.character(EmailID)) %>%
       mutate(time_of_day = ifelse(hour_of_day <11, "morning", 
                                   ifelse(hour_of_day >=11 & hour_of_day < 15, "midday", 
-                                         "evening")))
+                                         "evening"))) %>%
+      mutate(subject_length = sapply(gregexpr("\\W+", Subject), length) + 1)
 num_emails <- dim(emails[1])
+
 ```
 ## Some Formatting & Combining Data
 Some of the more useful questions -- like are email open rates the same on Tuesday as Wednesday -- require combining the email data with the recipients data. That's because the fields about the email, like time of day, are in the email dataframe while opens and clicks are in the recipients file.
@@ -82,6 +85,12 @@ Some of the more useful questions -- like are email open rates the same on Tuesd
 ```{r}
 #Combine emails with recipients data
 emailAll  <- inner_join(emails, recipients, by = c("EmailID" ="EmailID"))
+#Add open rates and number of recipients to each email
+emails <- emailAll %>% 
+                select(EmailID, OpenStatus) %>%
+                group_by(EmailID) %>%
+                summarise(open_rate = mean(OpenStatus), recipients = n()) %>%
+                inner_join(emails, by=c("EmailID" = "EmailID"))
 
 ```
 
@@ -189,15 +198,68 @@ Now that we've seen there's a reletionship between the day an email is sent and 
 3. Evening: After 3 PM
 
 ```{r}
-
 open_rates <- emailAll %>%
                         select(EmailID, time_of_day, EmailCategoryTitle, OpenStatus) %>%
                         group_by(EmailID, time_of_day,EmailCategoryTitle) %>%
                         summarise(open_rate = mean(OpenStatus))
 ggplot(open_rates, aes(x=time_of_day, y=open_rate))+
-    geom_violin() + 
+    geom_boxplot() + 
+    scale_y_continuous(labels=percent) 
+```
+
+```{r}
+sbj_len_opn_rt <- emailAll %>%
+                            select(subject_length, OpenStatus) %>%
+                            group_by(subject_length) %>%
+                            summarise(open_rate = mean(OpenStatus), people_emailed = n())
+ggplot(sbj_len_opn_rt, aes(x=subject_length, y=open_rate))+
+    geom_jitter(aes(size=people_emailed)) + 
+    geom_smooth(method="loess")+
+    labs(
+        x="Subject Line Word Count",
+        title="Emails with Longer Subject Lines Tend to Have Lower Open Rates",
+        subtitle="Would be a good candidate for A/B testing"
+    )+
     scale_y_continuous(labels=percent)
 ```
+
+It appears there is a slight negative relationship between the number of words in an emails subject line and the open rate. But what about what's in the subject line? Perhaps we could learn about what those words are. A first step is to take the words from all the subject lines and create a Document Term Matrix. A DTM will take all the email subject line and turn them in to a table with counts for each word in the subject. 
+
+
+    |Email | word_1 | word_2 | word_3 |  ...  | word_n  |    
+    |______|________|________|________|_______|_________|
+    |  A   |    0   |   1    |    0   |  ...  |    2    |
+    |______|________|________|________|_______|_________|
+    |  B   |    1   |    0   |    3   |  ...  |    0    |
+    |______|________|________|________|_______|_________|
+    |  .
+    |  .
+    |  .
+      
+We'll set it up to ingnore frequently occuring words called "stopwords", remove numbers, and stem words so -- for example -- classes becomes class. Once doing this we can take a look at the most frequently occuring words in 2016 Anderson emails.
+
+```{r}
+corpus <- Corpus(VectorSource(emails$Subject))
+dtm <- DocumentTermMatrix(corpus, control=list(stopwords=TRUE))
+
+dtm <- DocumentTermMatrix(corpus,
+                          control = list(
+                                         stopwords = TRUE,
+                                         stemming=TRUE,
+                                         removeNumbers=TRUE)
+)
+findFreqTerms(dtm,15)     
+```
+
+
+```{r}
+freq = data.frame(sort(colSums(as.matrix(dtm)), decreasing=TRUE))
+wordcloud(rownames(freq), freq[,1], max.words=50, colors=brewer.pal(1, "Dark2"))
+```
+
+
+
+## Other Questions
 
 ```{r }
 # Open Rates by Degree Year
